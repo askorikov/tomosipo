@@ -20,6 +20,25 @@ from torch.autograd import Function
 import itertools
 
 
+def _apply_broadcasted(operator, input, extra_dims, is_2d):
+    """Apply tomosipo.Operator taking care of extra dimensions and 2D/3D distinction"""
+    output = input.new_empty(extra_dims + operator.range_shape, dtype=torch.float32)
+
+    if is_2d:
+        input = torch.unsqueeze(input, dim=-3)
+
+    if len(extra_dims) == 0:
+        operator(input, out=output)
+    else:
+        for subspace in itertools.product(*[range(dim_size) for dim_size in extra_dims]):
+            operator(input[subspace], out=output[subspace])
+
+    if is_2d:
+        output = torch.squeeze(output, dim=-3)
+
+    return output
+
+
 class OperatorFunction(Function):
     @staticmethod
     def forward(ctx, input, operator, num_extra_dims=0, is_2d=False):
@@ -40,43 +59,14 @@ class OperatorFunction(Function):
         "To add batch and channel dimensions set argument num_extra_dims=2\n"
         "To remove the first operator dimension set argument is_2d=True\n"
         )
-
-        output = input.new_empty(extra_dims + operator.range_shape, dtype=torch.float32)
-
-        if is_2d:
-            input = torch.unsqueeze(input, dim=-3)
-
-        if len(extra_dims) == 0:
-            operator(input, out=output)
-        else:
-            for subspace in itertools.product(*[range(dim_size) for dim_size in extra_dims]):
-                operator(input[subspace], out=output[subspace])
-        
-        if is_2d:
-            output = torch.squeeze(output, dim=-3)
-        return output
+        return _apply_broadcasted(operator, input, extra_dims, is_2d)
 
     @staticmethod
     def backward(ctx, grad_output):
         operator = ctx.operator
         extra_dims = ctx.extra_dims
         is_2d = ctx.is_2d
-        
-        grad_input = grad_output.new_empty(extra_dims + operator.domain_shape, dtype=torch.float32)
-        
-        if is_2d:
-            grad_output = torch.unsqueeze(grad_output, dim=-3)
-
-        if len(extra_dims) == 0:
-            operator.T(grad_output, out=grad_input)
-        else:
-            for subspace in itertools.product(*[range(dim_size) for dim_size in extra_dims]):
-                operator.T(grad_output[subspace], out=grad_input[subspace])
-        
-        if is_2d:
-            grad_input = torch.squeeze(grad_input, dim=-3)
-
-        # do not return gradient for operator
+        grad_input = _apply_broadcasted(operator, grad_output, extra_dims, is_2d)
         return grad_input, None, None, None
 
 
