@@ -66,6 +66,24 @@ class OperatorFunction(Function):
         operator = ctx.operator
         extra_dims = ctx.extra_dims
         is_2d = ctx.is_2d
+        # Make backward an autograd function to enable double backward
+        return OperatorBackwardFunction.apply(grad_output, operator, extra_dims, is_2d)
+
+
+class OperatorBackwardFunction(Function):
+    @staticmethod
+    def forward(ctx, grad_output, operator, extra_dims, is_2d):
+        ctx.operator = operator
+        ctx.extra_dims = extra_dims
+        ctx.is_2d = is_2d
+        grad_input = _apply_broadcasted(operator.T, grad_output, extra_dims, is_2d)
+        return grad_input, None, None, None
+
+    @staticmethod
+    def backward(ctx, grad_output, *args):
+        operator = ctx.operator
+        extra_dims = ctx.extra_dims
+        is_2d = ctx.is_2d
         grad_input = _apply_broadcasted(operator, grad_output, extra_dims, is_2d)
         return grad_input, None, None, None
 
